@@ -21,7 +21,7 @@ INSTRUCTION_SET_MAPPING = {
 
 
 def get_input_file_hash():
-    return idautils.GetInputFileMD5()
+    return idautils.GetInputFileMD5().hex()
 
 
 def get_selection():
@@ -45,7 +45,7 @@ def get_inf_structure_bitness(info):
 
 def get_arch_info():
     info = idaapi.get_inf_structure()
-    proc = info.procName.lower()
+    proc = info.procname.lower()
     bits = get_inf_structure_bitness(info)
     instruction_set = None
     instruction_mode = None
@@ -71,7 +71,7 @@ class YaraRuleDialog(QtWidgets.QDialog):
 
     def populate_form(self):
         self.setWindowTitle('mkYARA :: Generated Yara Rule')
-        self.resize(800, 600)
+        self.resize(1200, 1000)
         self.layout = QtWidgets.QVBoxLayout(self)
         self.top_layout = QtWidgets.QHBoxLayout()
         self.bottom_layout = QtWidgets.QHBoxLayout()
@@ -163,7 +163,7 @@ class mkYARAPlugin(idaapi.plugin_t):
         size = end - start
         data = idaapi.get_bytes(start, size)
         ins_set, ins_mode = get_arch_info()
-        yr_gen = YaraGenerator(mode, ins_set, ins_mode)
+        yr_gen = YaraGenerator(mode, ins_set, ins_mode, start, end)
         yr_gen.add_chunk(data, offset=start, is_data=is_data)
         rule_obj = yr_gen.generate_rule()
         file_hash = get_input_file_hash()

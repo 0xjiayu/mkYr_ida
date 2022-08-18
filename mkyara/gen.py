@@ -10,6 +10,8 @@ from capstone import (
 from .yararule import YaraRule, StringType
 from datetime import datetime
 
+import idc, ida_ua
+
 """
 Author:
 Jelle Vergeer / Fox-IT - Threat Intelligence
@@ -34,15 +36,17 @@ class DataChunk(object):
 
 
 class YaraGenerator(object):
-    def __init__(self, sig_mode, instruction_set, instruction_mode, rule_name="generated_rule", do_comment=True):
-        self.instruction_set = instruction_set
+    def __init__(self, sig_mode, instruction_set, instruction_mode, start_ea_in_ida, end_ea_in_ida, rule_name="generated_rule", do_comment=True):
+        self.instruction_set  = instruction_set
         self.instruction_mode = instruction_mode
-        self.do_comment_sig = do_comment
-        self.sig_mode = sig_mode
-        self.rule_name = rule_name
-        self.yr_rule = YaraRule()
-        self._signature = ""
-        self._chunks = []
+        self.do_comment_sig   = do_comment
+        self.sig_mode         = sig_mode
+        self.rule_name        = rule_name
+        self.insn_start_ea    = start_ea_in_ida
+        self.insn_end_ea      = end_ea_in_ida
+        self.yr_rule          = YaraRule()
+        self._signature       = ""
+        self._chunks          = []
 
     def add_chunk(self, data, offset=0, is_data=False):
         self._chunks.append(DataChunk(data, offset=offset, is_data=is_data))
@@ -121,13 +125,15 @@ class YaraGenerator(object):
     def generate_rule(self):
         """ Generate Yara rule. Return a YaraRule object """
         self.yr_rule.rule_name = self.rule_name
-        self.yr_rule.metas["generated_by"] = "\"mkYARA - By Jelle Vergeer\""
+        self.yr_rule.metas["generated_by"] = "\"mkYARA - Created By Jelle Vergeer, improved by JiaYu\""
         self.yr_rule.metas["date"] = "\"{}\"".format(datetime.now().strftime("%Y-%m-%d %H:%M"))
         self.yr_rule.metas["version"] = "\"1.0\""
 
-        md = Cs(self.instruction_set, self.instruction_mode)
-        md.detail = True
-        md.syntax = CS_OPT_SYNTAX_INTEL
+        md = None
+        if self.instruction_set and self.instruction_mode:
+            md = Cs(self.instruction_set, self.instruction_mode)
+            md.detail = True
+            md.syntax = CS_OPT_SYNTAX_INTEL
         chunk_nr = 0
 
         for chunk in self._chunks:
@@ -136,17 +142,41 @@ class YaraGenerator(object):
             chunk_signature = ""
             chunk_comment = ""
             if chunk.is_data is False:
-                disasm = md.disasm(chunk.data, chunk.offset)
-                for ins in disasm:
-                    rule_part, comment = self._process_instruction(ins)
-                    rule_part = self.format_hex(rule_part)
-                    chunk_signature += rule_part + "\n"
-                    chunk_comment += comment + "\n"
+                if md: # Use Capstone-Engine to disasm target data for x86
+                    disasm = md.disasm(chunk.data, chunk.offset)
+                    for ins in disasm:
+                        rule_part, comment = self._process_instruction(ins)
+                        rule_part = self.format_hex(rule_part)
+                        chunk_signature += rule_part + "\n"
+                        chunk_comment += comment + "\n"
+                else:   # Use IDA Pro's own disasm capablity for other CPU Archs
+                    curr_addr = self.insn_start_ea
+                    insn_data_cursor = 0
+                    while curr_addr < self.insn_end_ea:
+                        insn       = ida_ua.insn_t()
+                        insn_len   = ida_ua.decode_insn(insn, curr_addr)
+                        insn_bytes = chunk.data[insn_data_cursor : insn_data_cursor + insn_len]
+
+                        insn_hex  = binascii.hexlify(insn_bytes).upper()
+                        insn_hex  = insn_hex.decode("ascii")
+                        rule_part = self.format_hex(insn_hex)
+
+                        insn_comment = f"{rule_part}"
+                        insn_comment = insn_comment.ljust(30)
+                        insn_comment += idc.GetDisasm(curr_addr)
+                        insn_comment = f"{curr_addr:#x} {insn_comment}"
+
+                        chunk_signature += rule_part + "\n"
+                        chunk_comment   += insn_comment + "\n"
+
+                        curr_addr      = idc.next_head(curr_addr)
+                        insn_data_cursor += insn_len
+
                 self.yr_rule.add_string(chunk_id, chunk_signature, StringType.HEX)
                 if self.do_comment_sig:
                     self.yr_rule.comments.append(chunk_comment)
             else:
-                rule_part = self.format_hex(chunk.data.encode("hex"))
+                rule_part = self.format_hex(chunk.data.hex())
                 self.yr_rule.add_string(chunk_id, rule_part, StringType.HEX)
 
         self.yr_rule.condition = "any of them"

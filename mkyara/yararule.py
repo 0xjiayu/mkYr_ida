@@ -63,8 +63,14 @@ class YaraRule(object):
         """ Generate a section with the comments """
         if len(self.comments) > 0:
             for comment_txt in self.comments:
-                comment = "/*\n{} */".format(comment_txt)
-                self._writer.write_block(comment)
+                comment = "/*\n{}*/".format(comment_txt)
+                self._writer.writeline("/*")
+                self._writer.indent()
+                self._writer.write_block(comment_txt)
+                self._writer.dedent()
+                if self._writer.buf[-1] == "\n" and self._writer.buf[-2] == "\t":
+                    self._writer.buf = self._writer.buf[:-3]
+                self._writer.writeline("**/")
 
     def _generate_strings_section(self):
         """ Generate strings section """
